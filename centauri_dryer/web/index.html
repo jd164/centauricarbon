@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Centauri Carbon — Filament Drying Manager</title>
+  <meta name="description" content="Filament drying controller and real-time monitoring application (PETG, PLA, ASA, TPU, Nylon) for Elegoo Centauri Carbon via SDCP V3.0.0.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <!-- Background Glows -->
+  <div class="glow-bg glow-1"></div>
+  <div class="glow-bg glow-2"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          </svg>
+        </div>
+        <div>
+          <h1>Centauri Carbon <span class="badge-tag">SDCP v3</span></h1>
+          <p class="subtitle">Filament Drying Controller & Monitor</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Light Toggle -->
+        <button id="btn-light" class="btn-icon" title="Chamber Light" aria-label="Chamber Light">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+            <circle cx="12" cy="12" r="5"/>
+          </svg>
+          <span id="light-label">Light: OFF</span>
+        </button>
+
+        <!-- Sound Toggle -->
+        <button id="btn-sound" class="btn-icon active" title="Audio Alerts" aria-label="Audio Alerts">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          </svg>
+          <span>Sound</span>
+        </button>
+
+        <!-- Connection Badge -->
+        <div id="connection-pill" class="status-pill offline">
+          <span class="pulse-dot"></span>
+          <span id="connection-text">Connecting...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Spool Flip Alert Banner -->
+    <div id="spool-alert-banner" class="alert-banner hidden">
+      <div class="alert-content">
+        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+        <div>
+          <h4>Half-Cycle Reached! (50%)</h4>
+          <p>It is recommended to flip the filament spool on the bed to ensure 100% even moisture removal across all spool layers.</p>
+        </div>
+      </div>
+      <button id="btn-dismiss-alert" class="btn-secondary btn-sm">Confirm & Dismiss</button>
+    </div>
+
+    <!-- Safety Warning Banner (if printing) -->
+    <div id="printer-busy-banner" class="alert-banner warning-banner hidden">
+      <div class="alert-content">
+        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <div>
+          <h4>Warning: 3D Printer is Actively Printing!</h4>
+          <p>Starting a filament drying cycle during an active print is blocked for safety reasons.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Thermal Watchdog Alert Banner -->
+    <div id="thermal-anomaly-banner" class="alert-banner warning-banner hidden">
+      <div class="alert-content">
+        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        <div>
+          <h4>Thermal Watchdog Intervention</h4>
+          <p id="thermal-anomaly-text">The bed target or temperature dropped (idle timeout). The Watchdog automatically restored target heating.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Telemetry Cards Grid -->
+    <div class="grid telemetry-grid">
+      <!-- Bed Card -->
+      <div class="card glass-card">
+        <div class="card-header">
+          <span class="card-title">Heated Bed</span>
+          <div style="display: flex; gap: 6px;">
+            <span id="watchdog-badge" class="badge badge-neutral" title="Thermal Watchdog Active (Keepalive)">Anti-Timeout</span>
+            <span id="bed-status-badge" class="badge badge-neutral">Standby</span>
+          </div>
+        </div>
+        <div class="temp-readout">
+          <span id="bed-temp-val" class="temp-val">--.-</span>
+          <span class="temp-unit">°C</span>
+        </div>
+        <div class="target-meta">
+          <span>Target: <strong id="bed-target-val">--.- °C</strong></span>
+          <div class="mini-bar-track">
+            <div id="bed-bar" class="mini-bar-fill bed-fill" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chamber Card -->
+      <div class="card glass-card">
+        <div class="card-header">
+          <span class="card-title">Enclosed Chamber (Box)</span>
+          <span class="badge badge-cyan">Convection</span>
+        </div>
+        <div class="temp-readout">
+          <span id="chamber-temp-val" class="temp-val">--.-</span>
+          <span class="temp-unit">°C</span>
+        </div>
+        <div class="target-meta">
+          <span>Internal printer chamber environment</span>
+          <div class="mini-bar-track">
+            <div id="chamber-bar" class="mini-bar-fill chamber-fill" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ventilation Fan Card -->
+      <div class="card glass-card">
+        <div class="card-header">
+          <span class="card-title">Moisture Exhaust (Box Fan)</span>
+          <span id="fan-badge" class="badge badge-neutral">0%</span>
+        </div>
+        <div class="temp-readout fan-readout">
+          <span id="fan-val" class="temp-val">0</span>
+          <span class="temp-unit">%</span>
+        </div>
+        <div class="target-meta">
+          <span>Aux: <span id="aux-fan-val">0%</span> | Mod: <span id="model-fan-val">0%</span></span>
+          <div class="mini-bar-track">
+            <div id="fan-bar" class="mini-bar-fill fan-fill" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nozzle Safety Card -->
+      <div class="card glass-card">
+        <div class="card-header">
+          <span class="card-title">Nozzle (Extruder)</span>
+          <span class="badge badge-neutral">Inactive</span>
+        </div>
+        <div class="temp-readout">
+          <span id="nozzle-temp-val" class="temp-val">--.-</span>
+          <span class="temp-unit">°C</span>
+        </div>
+        <div class="target-meta">
+          <span>Target: <strong>0 °C (Safe)</strong></span>
+          <div class="mini-bar-track">
+            <div id="nozzle-bar" class="mini-bar-fill nozzle-fill" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Workspace: Preset Selector & Cycle Progress -->
+    <div class="grid main-grid">
+      <!-- Left Column: Presets & Controls -->
+      <div class="card glass-card control-panel">
+        <div class="section-title">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+          </svg>
+          <h3>Filament Presets</h3>
+        </div>
+
+        <div class="presets-list" id="presets-container">
+          <!-- Populated by JS: PETG, PLA, ASA, TPU, Nylon, Custom -->
+        </div>
+
+        <!-- Custom Config Drawer -->
+        <div id="custom-params-drawer" class="custom-drawer hidden">
+          <div class="param-row">
+            <label for="input-custom-temp">Bed Temperature (°C):</label>
+            <div class="input-with-stepper">
+              <input type="number" id="input-custom-temp" min="35" max="100" step="1" value="65">
+              <span class="unit">°C</span>
+            </div>
+          </div>
+          <div class="param-row">
+            <label for="input-custom-hours">Cycle Duration (Hours):</label>
+            <div class="input-with-stepper">
+              <input type="number" id="input-custom-hours" min="0.5" max="24" step="0.5" value="5.0">
+              <span class="unit">h</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ventilation Slider -->
+        <div class="ventilation-control">
+          <div class="vent-header">
+            <label for="fan-slider">Moisture Exhaust / Ventilation (Box Fan):</label>
+            <span id="vent-val-display">15%</span>
+          </div>
+          <input type="range" id="fan-slider" min="0" max="60" step="5" value="15">
+          <div class="vent-presets">
+            <button type="button" class="btn-chip" data-vent="0">0% (Silent)</button>
+            <button type="button" class="btn-chip active" data-vent="15">15% (Recommended)</button>
+            <button type="button" class="btn-chip" data-vent="30">30% (Fast Drying)</button>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="action-buttons">
+          <button id="btn-start" class="btn-primary">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            <span>Start Drying</span>
+          </button>
+
+          <button id="btn-pause" class="btn-secondary hidden">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="4" width="4" height="16"/>
+              <rect x="14" y="4" width="4" height="16"/>
+            </svg>
+            <span>Pause</span>
+          </button>
+
+          <button id="btn-resume" class="btn-secondary hidden">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            <span>Resume</span>
+          </button>
+
+          <button id="btn-cancel" class="btn-danger" title="Stop cycle or turn off heated bed at any time">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="4" y="4" width="16" height="16" rx="2"/>
+            </svg>
+            <span id="cancel-label">Stop / Turn Off</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Right Column: Live Circular Progress & Thermal Chart -->
+      <div class="card glass-card timer-panel">
+        <div class="section-title">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <h3>Cycle Progress</h3>
+        </div>
+
+        <div class="progress-display-wrapper">
+          <!-- Circular Progress SVG -->
+          <div class="radial-progress-container">
+            <svg class="radial-svg" viewBox="0 0 200 200">
+              <circle class="radial-bg" cx="100" cy="100" r="86"/>
+              <circle id="radial-bar" class="radial-bar" cx="100" cy="100" r="86" stroke-dasharray="540.35" stroke-dashoffset="540.35"/>
+            </svg>
+            <div class="radial-center-text">
+              <span id="cycle-state-pill" class="cycle-pill idle">IDLE</span>
+              <span id="remaining-timer" class="time-main">00:00:00</span>
+              <span id="progress-percent" class="time-sub">0.0% elapsed</span>
+              <span id="elapsed-meta" class="elapsed-meta">Started: --:--</span>
+            </div>
+          </div>
+
+          <!-- Quick Metrics -->
+          <div class="cycle-quick-stats">
+            <div class="stat-box">
+              <span class="stat-label">Active Material</span>
+              <strong id="stat-material" class="stat-value">PETG</strong>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">Target Temp</span>
+              <strong id="stat-target-temp" class="stat-value">65 °C</strong>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">Total Duration</span>
+              <strong id="stat-total-duration" class="stat-value">5.0 h</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Thermal Chart Container -->
+        <div class="chart-wrapper">
+          <div class="chart-header">
+            <h4>Real-Time Thermal Evolution</h4>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <a href="/api/thermal/export" class="btn-chip" id="btn-export-csv" title="Download complete thermal log as CSV" style="text-decoration: none; display: flex; align-items: center;">
+                <svg style="width:13px;height:13px;margin-right:4px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                CSV
+              </a>
+              <button type="button" class="btn-chip" id="btn-export-png" title="Save chart as PNG image" style="display: flex; align-items: center;">
+                <svg style="width:13px;height:13px;margin-right:4px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                PNG
+              </button>
+            </div>
+          </div>
+          <div class="chart-legend" style="margin-bottom: 8px;">
+            <span class="legend-item"><span class="legend-color bed-color"></span> Bed</span>
+            <span class="legend-item"><span class="legend-color target-color"></span> Target</span>
+            <span class="legend-item"><span class="legend-color chamber-color"></span> Chamber</span>
+          </div>
+          <div class="chart-canvas-box">
+            <canvas id="thermalChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Drying History Section -->
+    <div class="card glass-card history-panel">
+      <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <h3>Drying Session History</h3>
+        </div>
+        <button id="btn-clear-history" class="btn-secondary btn-sm" style="display: flex; align-items: center; gap: 6px;" title="Clear all recorded drying sessions">
+          <svg style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span>Clear History</span>
+        </button>
+      </div>
+      <div class="table-responsive">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>Date/Time</th>
+              <th>Filament</th>
+              <th>Target (°C)</th>
+              <th>Duration</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="history-table-body">
+            <tr>
+              <td colspan="5" class="text-center text-muted">No history recorded yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>Elegoo Centauri Carbon SDCP v3.0.0 — Native WebSocket Protocol (Port 3030)</p>
+      <p class="footer-ip">Target: <strong id="footer-printer-ip">--</strong> | MainboardID: <code id="footer-printer-id">--</code></p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
