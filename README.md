@@ -1,6 +1,7 @@
 # Elegoo Centauri Carbon — Filament Drying Manager (SDCP v3.0.0)
 
 A robust Python application for real-time control, thermal monitoring, and filament moisture removal (**PETG, PLA, ASA/ABS, TPU, Nylon, and Custom**) on the **Elegoo Centauri Carbon 1** 3D printer (stock firmware or OpenCentauri), communicating directly via the native **Elegoo SDCP V3.0.0** protocol over WebSocket.
+<img width="1440" height="1152" alt="Screenshot 2026-09-15 at 01-55-00 Centauri Carbon — Filament Drying Manager" src="https://github.com/user-attachments/assets/a8d1a4e7-7b87-4034-b93b-3793dca21f98" />
 
 ---
 
